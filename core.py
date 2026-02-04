@@ -29,7 +29,10 @@ def setup_logging():
     )
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    file_handler = logging.FileHandler("daemon.log", encoding="utf-8")
+    # 使用程序所在目录的绝对路径，避免权限问题
+    log_dir = os.path.dirname(os.path.abspath(__file__))
+    log_path = os.path.join(log_dir, "daemon.log")
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
@@ -197,6 +200,7 @@ def init_chrome(host):
     chrome_options.add_argument("--incognito")
     chrome_options.add_argument("disable-cache")
     chrome_options.add_argument("log-level=3")
+    chrome_options.add_argument("--headless=new")
 
     try:
         chrome = webdriver.Chrome(options=chrome_options)
