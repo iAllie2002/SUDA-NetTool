@@ -1,0 +1,15 @@
+{
+  "login": {
+    "account": "20245228021",
+    "password": "",
+    "operator": "中国电信",
+    "operator_xpath": "",
+    "account_xpath": "",
+    "password_xpath": "",
+    "submit_xpath": ""
+  },
+  "daemon": {
+    "host": "http://10.9.1.3/",
+    "frequencies": 30
+  }
+}
