@@ -344,8 +344,9 @@ class App:
     def _auto_start_daemon(self):
         """开机自启动时自动启动守护进程"""
         try:
-            # 检查账号是否配置（密码可以为空）
-            if self.account_var.get().strip():
+            # 检查账号是否配置（需与 validate_config 要求保持一致）
+            account = self.account_var.get().strip()
+            if account:
                 self.start()
                 self.hide_to_tray()  # 启动后最小化到托盘
             else:

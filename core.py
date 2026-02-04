@@ -105,7 +105,7 @@ def validate_config(cfg):
         errors.append("账号不能为空")
     # 密码可以为空，某些网络不需要密码
 
-    freq = cfg.get("frequencies", 10)
+    freq = cfg.get("daemon", {}).get("frequencies", DEFAULT_CONFIG["daemon"]["frequencies"])
     try:
         freq = int(freq)
         if freq < 5 or freq > 3600:
