@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import sys
 import threading
 import time
 from datetime import datetime
@@ -31,7 +32,11 @@ def setup_logging():
     logger.addHandler(handler)
     # 使用程序所在目录的绝对路径，避免权限问题
     try:
-        log_dir = os.path.dirname(os.path.abspath(__file__))
+        # 如果是打包后的exe，使用exe所在目录
+        if getattr(sys, "frozen", False):
+            log_dir = os.path.dirname(sys.executable)
+        else:
+            log_dir = os.path.dirname(os.path.abspath(__file__))
         log_path = os.path.join(log_dir, "daemon.log")
         file_handler = logging.FileHandler(log_path, encoding="utf-8")
         file_handler.setFormatter(formatter)
@@ -60,7 +65,11 @@ DEFAULT_CONFIG = {
 def load_config(path="config.json"):
     # 使用程序所在目录的绝对路径
     if not os.path.isabs(path):
-        config_dir = os.path.dirname(os.path.abspath(__file__))
+        # 如果是打包后的exe，使用exe所在目录
+        if getattr(sys, "frozen", False):
+            config_dir = os.path.dirname(sys.executable)
+        else:
+            config_dir = os.path.dirname(os.path.abspath(__file__))
         path = os.path.join(config_dir, path)
     if not os.path.exists(path):
         return DEFAULT_CONFIG.copy()
@@ -77,7 +86,11 @@ def load_config(path="config.json"):
 def save_config(cfg, path="config.json"):
     # 使用程序所在目录的绝对路径
     if not os.path.isabs(path):
-        config_dir = os.path.dirname(os.path.abspath(__file__))
+        # 如果是打包后的exe，使用exe所在目录
+        if getattr(sys, "frozen", False):
+            config_dir = os.path.dirname(sys.executable)
+        else:
+            config_dir = os.path.dirname(os.path.abspath(__file__))
         path = os.path.join(config_dir, path)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -90,17 +103,9 @@ def validate_config(cfg):
     login = cfg.get("login", {})
     if not login.get("account", "").strip():
         errors.append("账号不能为空")
-    if not login.get("password", "").strip():
-        errors.append("密码不能为空")
+    # 密码可以为空，某些网络不需要密码
 
-    daemon = cfg.get("daemon", {})
-    host = daemon.get("host", "").strip()
-    if not host:
-        errors.append("网关地址不能为空")
-    elif not (host.startswith("http://") or host.startswith("https://")):
-        errors.append("网关地址必须以 http:// 或 https:// 开头")
-
-    freq = daemon.get("frequencies", 10)
+    freq = cfg.get("frequencies", 10)
     try:
         freq = int(freq)
         if freq < 5 or freq > 3600:

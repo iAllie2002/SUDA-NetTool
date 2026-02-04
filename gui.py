@@ -133,8 +133,9 @@ class App:
         self._load_config()
 
         # 如果设置了系统启动，程序启动时自动启动守护进程
+        # 延迟2秒确保GUI完全加载并配置已读取
         if self.task_autostart_var.get():
-            self.root.after(1000, self._auto_start_daemon)
+            self.root.after(2000, self._auto_start_daemon)
 
     def _build_ui(self):
         main = ttk.Frame(self.root, padding=10)
@@ -343,10 +344,12 @@ class App:
     def _auto_start_daemon(self):
         """开机自启动时自动启动守护进程"""
         try:
-            # 检查配置是否完整
-            if self.account_var.get().strip() and self.password_var.get().strip():
+            # 检查账号是否配置（密码可以为空）
+            if self.account_var.get().strip():
                 self.start()
                 self.hide_to_tray()  # 启动后最小化到托盘
+            else:
+                self.append_log("自动启动失败：账号未配置")
         except Exception as e:
             self.append_log(f"自动启动失败: {e}")
 
@@ -374,9 +377,14 @@ class App:
         }
 
     def save(self):
-        cfg = self._build_config()
-        save_config(cfg, "config.json")
-        self._set_status("配置已保存")
+        try:
+            cfg = self._build_config()
+            save_config(cfg, "config.json")
+            self._set_status("配置已保存")
+            messagebox.showinfo("成功", "配置已成功保存到 config.json")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存配置失败: {e}")
+            self._set_status("保存失败")
 
     def start(self):
         if self.daemon and self.daemon.is_alive():
