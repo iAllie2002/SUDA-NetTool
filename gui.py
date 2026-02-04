@@ -1,18 +1,18 @@
 import os
 import sys
 import threading
+import subprocess
 from typing import Any, cast
 import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.scrolledtext import ScrolledText
-import winreg
 import pystray
 from PIL import Image, ImageDraw, ImageTk
 
-from core import NetDaemon, load_config, save_config, setup_logging
+from core import NetDaemon, load_config, save_config, setup_logging, validate_config
 
 APP_NAME = "苏州大学网关自动登录工具"
-RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+TASK_NAME = "SUDA_Net_Daemon_Boot"
 ICON_PATH = os.path.join(os.path.dirname(__file__), "resources", "suda-logo.png")
 
 
@@ -23,36 +23,66 @@ def _get_executable_command():
     return f'"{sys.executable}" "{script}"'
 
 
-def is_autostart_enabled():
-    if not winreg:
-        return False
+def is_task_scheduler_enabled():
+    """检查是否已创建任务计划程序"""
     try:
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ
-        ) as key:
-            value, _ = winreg.QueryValueEx(key, APP_NAME)
-        return bool(value)
-    except FileNotFoundError:
-        return False
+        result = subprocess.run(
+            ["schtasks", "/Query", "/TN", TASK_NAME],
+            capture_output=True,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        return result.returncode == 0
     except Exception:
         return False
 
 
-def set_autostart_enabled(enabled: bool):
-    if not winreg:
-        return
-    with winreg.OpenKey(
-        winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE
-    ) as key:
-        if enabled:
-            winreg.SetValueEx(
-                key, APP_NAME, 0, winreg.REG_SZ, _get_executable_command()
+def set_task_scheduler_enabled(enabled: bool):
+    """设置任务计划程序（系统启动时运行，无需登录）"""
+    exe_path = _get_executable_command().strip('"')
+
+    if enabled:
+        # 创建任务计划
+        # /SC ONSTART: 系统启动时触发
+        # /RL HIGHEST: 最高权限运行
+        # /DELAY 0000:30: 延迟30秒启动，等待网络初始化
+        cmd = [
+            "schtasks",
+            "/Create",
+            "/TN",
+            TASK_NAME,
+            "/TR",
+            exe_path,
+            "/SC",
+            "ONSTART",
+            "/RL",
+            "HIGHEST",
+            "/DELAY",
+            "0000:30",
+            "/F",  # 强制创建，覆盖已存在的任务
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
-        else:
-            try:
-                winreg.DeleteValue(key, APP_NAME)
-            except FileNotFoundError:
-                pass
+            if result.returncode != 0:
+                raise Exception(f"创建任务失败: {result.stderr}")
+        except Exception as e:
+            raise Exception(f"无法创建任务计划（可能需要管理员权限）: {e}")
+    else:
+        # 删除任务计划
+        try:
+            subprocess.run(
+                ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+        except Exception:
+            pass
 
 
 def create_tray_icon(on_open, on_exit):
@@ -84,6 +114,10 @@ class App:
         self.root.geometry("480x300")
         self.root.minsize(480, 300)
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
+        # 注册退出清理
+        import atexit
+
+        atexit.register(self._safe_cleanup)
         self._set_window_icon()
         self._init_style()
 
@@ -91,12 +125,16 @@ class App:
         self.tray_icon = None
 
         self.status_var = tk.StringVar(value="未启动")
-        self.autostart_var = tk.BooleanVar(value=is_autostart_enabled())
+        self.task_autostart_var = tk.BooleanVar(value=is_task_scheduler_enabled())
         self._log_lines = 0
         self._log_limit = 500
 
         self._build_ui()
         self._load_config()
+
+        # 如果设置了系统启动，程序启动时自动启动守护进程
+        if self.task_autostart_var.get():
+            self.root.after(1000, self._auto_start_daemon)
 
     def _build_ui(self):
         main = ttk.Frame(self.root, padding=10)
@@ -191,12 +229,20 @@ class App:
         )
 
         row += 1
+        task_frame = ttk.Frame(basic_tab)
+        task_frame.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=6)
         ttk.Checkbutton(
-            basic_tab,
-            text="开机启动",
-            variable=self.autostart_var,
-            command=self.toggle_autostart,
-        ).grid(row=row, column=0, sticky=tk.W, pady=6)
+            task_frame,
+            text="系统启动时运行（登录前自动联网）",
+            variable=self.task_autostart_var,
+            command=self.toggle_task_autostart,
+        ).pack(side=tk.LEFT)
+        ttk.Label(
+            task_frame,
+            text="⚠️ 需要管理员权限",
+            font=("Segoe UI", 8),
+            foreground="#FF6B6B",
+        ).pack(side=tk.LEFT, padx=8)
 
         row += 1
         btn_frame = ttk.Frame(basic_tab)
@@ -236,9 +282,12 @@ class App:
         about_text = (
             "本工具用于苏州大学网关自动登录与掉线重连。\n"
             "\n"
-            "作者：Les1ie（原作者）\n"
-            "维护：Allie\n"
+            "原始作者：Les1ie\n"
+            "维护作者：Allie\n"
             "\n"
+            "项目地址：https://github.com/iAllie2002/SUDA-NetTool\n"
+            "\n"
+            "如果你觉得有所帮助，欢迎在项目页面点个Star支持一下！\n"
         )
         ttk.Label(
             about_tab, text=about_text, style="Body.TLabel", justify=tk.LEFT
@@ -283,7 +332,31 @@ class App:
         self.password_xpath_var.set(login.get("password_xpath", ""))
         self.submit_xpath_var.set(login.get("submit_xpath", ""))
 
+    def _safe_cleanup(self):
+        """安全清理，用于程序异常退出时的保护"""
+        try:
+            if self.daemon and self.daemon.is_alive():
+                self.daemon.stop()
+        except Exception:
+            pass
+
+    def _auto_start_daemon(self):
+        """开机自启动时自动启动守护进程"""
+        try:
+            # 检查配置是否完整
+            if self.account_var.get().strip() and self.password_var.get().strip():
+                self.start()
+                self.hide_to_tray()  # 启动后最小化到托盘
+        except Exception as e:
+            self.append_log(f"自动启动失败: {e}")
+
     def _build_config(self):
+        try:
+            freq_str = self.freq_var.get().strip()
+            freq = int(freq_str) if freq_str else 10
+        except ValueError:
+            freq = 10
+
         return {
             "login": {
                 "account": self.account_var.get().strip(),
@@ -296,7 +369,7 @@ class App:
             },
             "daemon": {
                 "host": self.host_var.get().strip(),
-                "frequencies": int(self.freq_var.get().strip() or 10),
+                "frequencies": freq,
             },
         }
 
@@ -309,7 +382,16 @@ class App:
         if self.daemon and self.daemon.is_alive():
             self._set_status("已在运行")
             return
+
         cfg = self._build_config()
+
+        # 验证配置
+        valid, error_msg = validate_config(cfg)
+        if not valid:
+            messagebox.showerror("配置错误", f"配置验证失败：\n{error_msg}")
+            self._set_status("配置错误")
+            return
+
         save_config(cfg, "config.json")
         self.daemon = NetDaemon(cfg, on_status=self.handle_status)
         self.daemon.start()
@@ -354,12 +436,33 @@ class App:
         self.log_text.configure(state=tk.DISABLED)
         self._log_lines = 0
 
-    def toggle_autostart(self):
+    def toggle_task_autostart(self):
         try:
-            set_autostart_enabled(self.autostart_var.get())
+            set_task_scheduler_enabled(self.task_autostart_var.get())
+            if self.task_autostart_var.get():
+                messagebox.showinfo(
+                    "设置成功",
+                    "已创建系统启动任务。\n\n"
+                    "程序将在系统启动30秒后自动运行（无需用户登录），\n"
+                    "适合配合远程控制软件使用。",
+                )
         except Exception as e:
-            messagebox.showerror("错误", f"设置开机启动失败: {e}")
-            self.autostart_var.set(is_autostart_enabled())
+            messagebox.showerror(
+                "错误", f"设置系统启动失败: {e}\n\n请以管理员身份运行程序。"
+            )
+            self.task_autostart_var.set(is_task_scheduler_enabled())
+
+    def _cleanup_and_exit(self):
+        """清理资源并退出程序"""
+        try:
+            if self.daemon and self.daemon.is_alive():
+                self.daemon.stop()
+                # 等待线程结束，最多等待3秒
+                self.daemon.join(timeout=3)
+        except Exception as e:
+            print(f"清理资源时出错: {e}")
+        finally:
+            self.root.destroy()
 
     def hide_to_tray(self):
         if self.tray_icon:
@@ -374,7 +477,7 @@ class App:
         def on_exit(icon, _item=None):
             icon.stop()
             self.tray_icon = None
-            self.root.after(0, self.root.destroy)
+            self.root.after(0, self._cleanup_and_exit)
 
         self.tray_icon = create_tray_icon(on_open, on_exit)
         threading.Thread(target=self.tray_icon.run, daemon=True).start()

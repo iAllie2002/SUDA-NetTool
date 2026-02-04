@@ -2,6 +2,8 @@
 
 本项目继承自 [Les1ie/SUDA-Net-Daemon](https://github.com/Les1ie/SUDA-Net-Daemon)，用于在 Windows 环境下自动检测并保持苏州大学网关登录状态。
 
+妈妈再也不用担心工位电脑意外断网了！
+
 ## 功能
 - 自动检测登录状态
 - 自动登录与掉线重连
