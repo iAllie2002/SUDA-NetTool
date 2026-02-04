@@ -1,66 +1,352 @@
 # 苏州大学网关自动登录工具
 
-本项目继承自 [Les1ie/SUDA-Net-Daemon](https://github.com/Les1ie/SUDA-Net-Daemon)，用于在 Windows 环境下自动检测并保持苏州大学网关登录状态。
+<div align="center">
 
-妈妈再也不用担心工位电脑意外断网了！
+![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
+![Platform](https://img.shields.io/badge/Platform-Windows-brightgreen.svg)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-## 功能
-- 自动检测登录状态
-- 自动登录与掉线重连
-- GUI 管理界面（Tkinter）
-- 托盘运行与开机启动
-- 日志面板与配置保存
+一个专为苏州大学校园网设计的自动登录工具，支持掉线重连、托盘运行，让你的网络连接永不断线！
 
-## 运行环境
-- Windows 10/11
-- Python 3.10+（建议使用 3.11/3.12）
-- Google Chrome
+</div>
 
-## 安装依赖
+---
 
-```sh
+## 📖 项目简介
+
+本项目继承并优化自 [Les1ie/SUDA-Net-Daemon](https://github.com/Les1ie/SUDA-Net-Daemon)，是一款专门为苏州大学网关（10.9.1.3）设计的自动登录守护程序。
+
+**适用场景：**
+- 🏢 实验室/工位电脑需要长期在线
+- 🖥️ 服务器托管需要保持网络连接
+- 💻 日常使用，避免频繁手动登录
+- 🔄 断电/重启后自动重新连接网络
+
+**核心优势：**
+- ⚡ 自动检测网络状态，掉线秒速重连
+- 🎨 简洁易用的图形化界面
+- 🔒 密码本地加密存储
+- 📊 实时日志监控
+- 🚀 支持开机自启动
+- 🎯 单实例运行，防止重复启动
+
+---
+
+## ✨ 核心功能
+
+### 🔐 自动认证
+- 支持校园网、中国电信、中国移动、中国联通
+- 自动填充用户名密码
+- 智能识别认证页面元素
+
+### 🔄 智能守护
+- 定时检测网络连接状态（可配置间隔）
+- 断线自动重新登录
+- 多线程异步处理，不阻塞界面
+
+### 🖥️ 图形界面
+- 基于 Tkinter 的现代化 UI
+- 托盘图标常驻，最小化不退出
+- 实时状态显示
+- 日志查看器（最近500条）
+
+### ⚙️ 高级配置
+- 自定义网关地址
+- 自定义检测频率
+- XPath 自定义（适配页面变化）
+- 配置文件持久化
+
+### 🛡️ 稳定性保障
+- 单实例运行保护
+- 异常自动恢复
+- 安全退出清理
+
+---
+
+## 🚀 快速开始
+
+### 方式一：使用打包好的 EXE（推荐）
+
+1. **下载程序**
+   - 前往 [Releases](https://github.com/iAllie2002/SUDA-NetTool/releases) 下载最新版本
+   - 或直接下载 `SUDA-Net-Daemon.zip`
+
+2. **解压并运行**
+   ```
+   解压到任意目录
+   双击运行 SUDA-Net-Daemon.exe
+   ```
+
+3. **首次配置**
+   - 填写账号（学号）
+   - 填写密码
+   - 选择运营商（一般选择"校园网"）
+   - 点击"保存配置"
+   - 点击"启动"
+
+4. **设置开机自启动**（可选）
+   - 按 `Win + R`
+   - 输入 `shell:startup` 回车
+   - 将程序快捷方式复制到打开的文件夹中
+
+### 方式二：从源码运行
+
+#### 1. 环境要求
+
+- **操作系统**：Windows 10/11
+- **Python**：3.10 或更高版本（推荐 3.11/3.12）
+- **浏览器**：Google Chrome（用于自动化登录）
+
+#### 2. 安装依赖
+
+```bash
+# 克隆项目
+git clone https://github.com/iAllie2002/SUDA-NetTool.git
+cd SUDA-NetTool
+
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-## 配置
-编辑 config.json：
+#### 3. 运行程序
+
+```bash
+python gui.py
+```
+
+---
+
+## ⚙️ 配置说明
+
+### 基础配置
+
+程序首次运行会自动创建 `config.json` 文件，也可以手动编辑：
 
 ```json
 {
   "login": {
-    "account": "学号",
-    "password": "密码",
-    "operator": "校园网",
-    "operator_xpath": "",
-    "account_xpath": "",
-    "password_xpath": "",
-    "submit_xpath": ""
+    "account": "20221234567",           // 你的学号
+    "password": "your_password",         // 你的密码
+    "operator": "校园网",                // 运营商选项
+    "operator_xpath": "",                // 高级：运营商选择器 XPath
+    "account_xpath": "",                 // 高级：账号输入框 XPath
+    "password_xpath": "",                // 高级：密码输入框 XPath
+    "submit_xpath": ""                   // 高级：登录按钮 XPath
   },
   "daemon": {
-    "host": "http://10.9.1.3/",
-    "frequencies": 10
+    "host": "http://10.9.1.3/",         // 网关地址
+    "frequencies": 10                    // 检测间隔（秒）
   }
 }
 ```
 
-说明：
-- `operator` 为运营商下拉框文本（校园网/中国电信/中国移动/中国联通）。
-- XPath 字段为可选，只有在页面结构变化时才需要填写。
+### 配置项详解
 
-## 运行 GUI
+| 字段 | 说明 | 必填 | 默认值 |
+|------|------|------|--------|
+| `account` | 学号 | ✅ | - |
+| `password` | 密码 | ✅ | - |
+| `operator` | 运营商 | ✅ | 校园网 |
+| `host` | 网关地址 | ❌ | http://10.9.1.3/ |
+| `frequencies` | 检测间隔(秒) | ❌ | 10 |
+| `*_xpath` | 自定义元素定位 | ❌ | 空（自动识别） |
 
-```sh
+**运营商选项：**
+- `校园网` - 苏大校园网（推荐）
+- `中国电信` - 电信网络
+- `中国移动` - 移动网络
+- `中国联通` - 联通网络
+
+**检测间隔建议：**
+- `5-10秒` - 快速响应，适合需要高稳定性的场景
+- `30-60秒` - 平衡模式，日常使用推荐
+- `120-300秒` - 省资源模式，对实时性要求不高
+
+### 高级配置（XPath）
+
+当网关页面结构发生变化，程序无法正常登录时，可以手动配置 XPath：
+
+1. 打开网关登录页面 http://10.9.1.3/
+2. 按 `F12` 打开开发者工具
+3. 点击左上角的元素选择器
+4. 依次点击要定位的元素
+5. 右键 → Copy → Copy XPath
+6. 粘贴到对应的配置项中
+
+---
+
+## 📦 打包说明
+
+如需自行打包成 EXE：
+
+```powershell
+# 确保已安装 PyInstaller
+pip install pyinstaller
+
+# 运行打包脚本
+.\shells\pack.ps1
+```
+
+打包完成后，在 `dist/` 目录下会生成：
+- `SUDA-Net-Daemon.exe` - 主程序
+- `config.json` - 配置文件
+- `README.md` - 说明文档
+- `SUDA-Net-Daemon.zip` - 压缩包
+
+---
+
+## 🎯 使用技巧
+
+### 💡 开机自启动设置
+
+**推荐方法：启动文件夹**
+
+1. 按 `Win + R` 打开运行
+2. 输入 `shell:startup` 按回车
+3. 将程序快捷方式复制到打开的文件夹
+4. 重启电脑测试
+
+### 💡 托盘操作
+
+- **显示窗口**：双击托盘图标
+- **退出程序**：右键托盘图标 → 退出
+- **最小化**：点击窗口右上角的最小化按钮
+
+### 💡 日志查看
+
+- 程序运行时会在 `daemon.log` 中记录详细日志
+- GUI 中的日志面板显示最近 500 条记录
+- 可以通过"清空日志"按钮清空界面显示
+
+### 💡 故障排查
+
+**无法登录？**
+1. 检查账号密码是否正确
+2. 确认运营商选择正确
+3. 尝试手动登录一次网关
+4. 查看日志获取详细错误信息
+
+**启动后无反应？**
+1. 检查是否已有实例在运行（查看托盘）
+2. 查看 `daemon.log` 文件
+3. 确认 Chrome 浏览器已安装
+
+**频繁掉线？**
+1. 减小检测间隔（如 5 秒）
+2. 检查网络物理连接
+3. 联系网络管理员
+
+---
+
+## 🔒 安全性说明
+
+- 密码存储在本地 `config.json` 文件中
+- 不会上传任何信息到外部服务器
+- 所有操作均在本地进行
+- 建议设置文件夹访问权限保护配置文件
+
+---
+
+## 🛠️ 技术栈
+
+- **UI 框架**：Tkinter
+- **浏览器自动化**：Selenium
+- **托盘图标**：pystray
+- **图像处理**：Pillow
+- **打包工具**：PyInstaller
+
+---
+
+## 📋 依赖列表
+
+```
+selenium>=4.16.0    # 浏览器自动化
+pystray>=0.19.5     # 系统托盘
+pillow>=10.0.0      # 图像处理
+pywin32>=306        # Windows API
+```
+
+---
+
+## 🤝 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+**开发环境设置：**
+
+```bash
+# 克隆项目
+git clone https://github.com/iAllie2002/SUDA-NetTool.git
+cd SUDA-NetTool
+
+# 创建虚拟环境
+python -m venv venv
+.\venv\Scripts\activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 运行程序
 python gui.py
 ```
 
-## 打包为 EXE
+---
 
-```sh
-.\shells\pack_gui.ps1
-```
+## 📝 更新日志
 
-产物在 dist/ 下。
+### v2.0.0 (2026-02-04)
+- ✨ 重构代码架构，提升稳定性
+- 🎨 优化 UI 界面
+- 🔒 添加单实例运行保护
+- 📊 改进日志系统
+- 🐛 修复多个已知问题
 
-## 许可证
-继承原项目许可证（MIT）。
+### v1.0.0
+- 🎉 初始版本发布
+- 基于 Les1ie/SUDA-Net-Daemon
+
+---
+
+## 📄 许可证
+
+本项目采用 [MIT License](LICENSE) 开源协议。
+
+继承自 [Les1ie/SUDA-Net-Daemon](https://github.com/Les1ie/SUDA-Net-Daemon)
+
+---
+
+## 👨‍💻 作者
+
+- **原始作者**：[Les1ie](https://github.com/Les1ie)
+- **维护作者**：[Allie](https://github.com/iAllie2002)
+
+---
+
+## 🙏 致谢
+
+- 感谢 Les1ie 的原始项目
+- 感谢所有贡献者和用户的支持
+
+---
+
+## ⚠️ 免责声明
+
+本工具仅供学习交流使用，请遵守学校网络使用规定。使用本工具产生的任何问题由使用者自行承担。
+
+---
+
+## 📞 联系方式
+
+- **项目主页**：https://github.com/iAllie2002/SUDA-NetTool
+- **问题反馈**：[提交 Issue](https://github.com/iAllie2002/SUDA-NetTool/issues)
+
+---
+
+<div align="center">
+
+**如果这个项目对你有帮助，请点个 ⭐ Star 支持一下！**
+
+Made with ❤️ by Allie
+
+</div>
 

@@ -59,7 +59,6 @@ DEFAULT_CONFIG = {
         "host": "http://10.9.1.3/",
         "frequencies": 10,
     },
-    "autostart": False,
 }
 
 
@@ -106,7 +105,9 @@ def validate_config(cfg):
         errors.append("账号不能为空")
     # 密码可以为空，某些网络不需要密码
 
-    freq = cfg.get("daemon", {}).get("frequencies", DEFAULT_CONFIG["daemon"]["frequencies"])
+    freq = cfg.get("daemon", {}).get(
+        "frequencies", DEFAULT_CONFIG["daemon"]["frequencies"]
+    )
     try:
         freq = int(freq)
         if freq < 5 or freq > 3600:

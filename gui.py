@@ -1,14 +1,12 @@
 import os
 import sys
 import threading
-import subprocess
 from typing import Any, cast
 import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.scrolledtext import ScrolledText
 import pystray
 from PIL import Image, ImageDraw, ImageTk
-import ctypes
 
 try:
     import win32event  # type: ignore
@@ -22,130 +20,24 @@ except ImportError:
 from core import NetDaemon, load_config, save_config, setup_logging, validate_config
 
 APP_NAME = "苏州大学网关自动登录工具"
-TASK_NAME = "SUDA_Net_Daemon_Boot"
 ICON_PATH = os.path.join(os.path.dirname(__file__), "resources", "suda-logo.png")
-MUTEX_NAME = "Global\\SUDA_Net_Daemon_Mutex"
+MUTEX_UI = "Local\\SUDA_Net_Daemon_UI_Mutex"
 
 
-def is_admin():
-    """检查当前进程是否具有管理员权限"""
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except Exception:
-        return False
-
-
-def run_as_admin():
-    """以管理员权限重新启动程序"""
-    try:
-        if getattr(sys, "frozen", False):
-            # 打包后的 exe
-            script = sys.executable
-            params = " ".join([f'"{arg}"' for arg in sys.argv[1:]])
-        else:
-            # 开发环境
-            script = os.path.abspath(sys.argv[0])
-            params = " ".join([f'"{arg}"' for arg in sys.argv[1:]])
-
-        # 使用 ShellExecute 请求管理员权限
-        ctypes.windll.shell32.ShellExecuteW(
-            None,
-            "runas",
-            sys.executable if getattr(sys, "frozen", False) else "python",
-            f'"{script}" {params}' if not getattr(sys, "frozen", False) else params,
-            None,
-            1,
-        )
-        return True
-    except Exception:
-        return False
-
-
-def _get_executable_command():
-    if getattr(sys, "frozen", False):
-        return f'"{sys.executable}"'
-    script = os.path.abspath(sys.argv[0])
-    return f'"{sys.executable}" "{script}"'
-
-
-def is_task_scheduler_enabled():
-    """检查是否已创建任务计划程序"""
-    try:
-        result = subprocess.run(
-            ["schtasks", "/Query", "/TN", TASK_NAME],
-            capture_output=True,
-            text=True,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def set_task_scheduler_enabled(enabled: bool):
-    """设置任务计划程序（系统启动时运行，无需登录）"""
-    exe_path = _get_executable_command().strip('"')
-
-    if enabled:
-        # 添加 --autostart 参数，用于标识由任务计划启动
-        task_command = f'"{exe_path}" --autostart'
-
-        # 创建任务计划
-        # /SC ONSTART: 系统启动时触发
-        # /RL HIGHEST: 最高权限运行
-        # /DELAY 0000:30: 延迟30秒启动，等待网络初始化
-        cmd = [
-            "schtasks",
-            "/Create",
-            "/TN",
-            TASK_NAME,
-            "/TR",
-            task_command,
-            "/SC",
-            "ONSTART",
-            "/RL",
-            "HIGHEST",
-            "/DELAY",
-            "0000:30",
-            "/F",  # 强制创建，覆盖已存在的任务
-        ]
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            if result.returncode != 0:
-                raise Exception(f"创建任务失败: {result.stderr}")
-        except Exception as e:
-            raise Exception(f"无法创建任务计划（可能需要管理员权限）: {e}")
-    else:
-        # 删除任务计划
-        try:
-            subprocess.run(
-                ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        except Exception:
-            pass
-
-
-def ensure_single_instance():
+def ensure_single_instance(mutex_name: str, show_message: bool = True):
     """确保程序只运行一个实例"""
     if not HAS_WIN32:
         return None
 
     try:
         # CreateMutex的第一个参数应该省略，让其使用默认安全描述符
-        mutex = win32event.CreateMutex(None, 1, MUTEX_NAME)  # type: ignore
+        mutex = win32event.CreateMutex(None, 1, mutex_name)  # type: ignore
         last_error = win32api.GetLastError()
         if last_error == winerror.ERROR_ALREADY_EXISTS:
-            messagebox.showerror(
-                "程序已运行", f"{APP_NAME}已经在运行中！\n\n请检查系统托盘图标。"
-            )
+            if show_message:
+                messagebox.showerror(
+                    "程序已运行", f"{APP_NAME}已经在运行中！\n\n请检查系统托盘图标。"
+                )
             return None
         return mutex
     except Exception as e:
@@ -192,9 +84,9 @@ class App:
         self.daemon = None
         self.tray_icon = None
         self._tray_thread = None
+        self.config = {}  # 初始化配置字典
 
         self.status_var = tk.StringVar(value="未启动")
-        self.task_autostart_var = tk.BooleanVar(value=False)
         self._log_lines = 0
         self._log_limit = 500
 
@@ -204,9 +96,8 @@ class App:
         # 立即创建托盘图标（常驻）
         self.root.after(100, self._create_persistent_tray)
 
-        # 只有当明确是由任务计划启动时才自动运行（通过命令行参数判断）
-        if "--autostart" in sys.argv:
-            self.root.after(2000, self._auto_start_daemon)
+        # 自动启动网络连接（延迟2秒，确保界面加载完成）
+        self.root.after(2000, self._auto_start_network)
 
     def _build_ui(self):
         main = ttk.Frame(self.root, padding=10)
@@ -301,16 +192,6 @@ class App:
         )
 
         row += 1
-        task_frame = ttk.Frame(basic_tab)
-        task_frame.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=6)
-        ttk.Checkbutton(
-            task_frame,
-            text="系统启动时运行",
-            variable=self.task_autostart_var,
-            command=self.toggle_task_autostart,
-        ).pack(side=tk.LEFT)
-
-        row += 1
         btn_frame = ttk.Frame(basic_tab)
         btn_frame.grid(row=row, column=0, columnspan=3, sticky=tk.W)
 
@@ -398,20 +279,6 @@ class App:
         self.password_xpath_var.set(login.get("password_xpath", ""))
         self.submit_xpath_var.set(login.get("submit_xpath", ""))
 
-        # 从配置文件读取开机自启状态（默认为 False）
-        autostart_enabled = self.config.get("autostart", False)
-        self.task_autostart_var.set(autostart_enabled)
-
-        # 同步实际的任务计划状态到配置文件（如果不一致则以配置文件为准）
-        actual_task_state = is_task_scheduler_enabled()
-        if actual_task_state != autostart_enabled:
-            # 如果实际任务状态和配置不符，则按配置文件设置任务计划
-            try:
-                set_task_scheduler_enabled(autostart_enabled)
-            except Exception:
-                # 如果设置失败（可能没有管理员权限），保持配置文件状态
-                pass
-
     def _create_persistent_tray(self):
         """创建常驻托盘图标"""
         if self.tray_icon:
@@ -443,27 +310,26 @@ class App:
         except Exception:
             pass
 
-    def _auto_start_daemon(self):
-        """开机自启动时自动启动守护进程"""
+    def _auto_start_network(self):
+        """自动启动网络连接"""
         try:
-            # 检查守护进程是否已在运行
+            # 检查是否已经在运行
             if self.daemon and self.daemon.is_alive():
-                self.append_log("守护进程已在运行，跳过自动启动")
-                self.hide_to_tray()
+                self.append_log("守护进程已在运行")
                 return
 
             # 检查账号是否配置
             if not self.account_var.get().strip():
-                self.append_log("自动启动失败：账号未配置")
+                self.append_log("提示：请先配置账号信息后再启动")
                 return
 
-            self.append_log("正在自动启动守护进程...")
+            # 自动启动
+            self.append_log("正在自动连接网络...")
             self.start()
 
-            # 启动成功后最小化到托盘
+            # 如果启动成功，最小化到托盘
             if self.daemon and self.daemon.is_alive():
-                self.hide_to_tray()
-                self.append_log("自动启动成功，已最小化到托盘")
+                self.root.after(1000, self.hide_to_tray)
         except Exception as e:
             self.append_log(f"自动启动失败: {e}")
 
@@ -504,6 +370,8 @@ class App:
                 )
 
             save_config(cfg, "config.json")
+            # 更新内存中的配置，保持一致性
+            self.config = cfg
             self._set_status("配置已保存")
             messagebox.showinfo("成功", "配置已成功保存到 config.json")
         except Exception as e:
@@ -586,47 +454,6 @@ class App:
         self.log_text.configure(state=tk.DISABLED)
         self._log_lines = 0
 
-    def toggle_task_autostart(self):
-        # 先保存当前UI中的状态（用户刚刚点击后的状态）
-        new_state = self.task_autostart_var.get()
-        # 获取实际的任务计划状态（点击前的状态）
-        old_state = is_task_scheduler_enabled()
-
-        try:
-            set_task_scheduler_enabled(new_state)
-            # 设置成功后再次验证
-            actual_state = is_task_scheduler_enabled()
-            if actual_state != new_state:
-                # 如果实际状态与期望不符，回滚
-                raise Exception("任务状态验证失败")
-
-            # 保存状态到配置文件
-            self.config["autostart"] = new_state
-            save_config(self.config)
-
-            if new_state:
-                messagebox.showinfo(
-                    "设置成功",
-                    "已创建系统启动任务。\n\n程序将在系统启动30秒后自动运行，\n",
-                )
-            else:
-                messagebox.showinfo("设置成功", "已取消系统启动任务。")
-        except Exception as e:
-            # 设置失败，立即还原复选框状态到操作前的状态
-            # 保存错误信息，避免闭包中访问变量的问题
-            error_message = str(e)
-
-            # 使用after延迟执行，确保在事件循环中正确更新UI
-            def restore_and_show_error():
-                self.task_autostart_var.set(old_state)
-                self.root.update_idletasks()
-                messagebox.showerror(
-                    "错误",
-                    f"设置系统启动失败: {error_message}\n\n请以管理员身份运行程序。",
-                )
-
-            self.root.after(10, restore_and_show_error)
-
     def _cleanup_and_exit(self):
         """清理资源并退出程序"""
         try:
@@ -656,39 +483,10 @@ class App:
 
 
 if __name__ == "__main__":
-    # 检查是否具有管理员权限
-    if not is_admin():
-        # 创建隐藏的 tkinter 根窗口用于显示消息框
-        temp_root = tk.Tk()
-        temp_root.withdraw()  # 隐藏主窗口
-
-        result = messagebox.askyesno(
-            "需要管理员权限",
-            "此程序需要管理员权限才能运行。\n\n是否以管理员身份重新启动？",
-            icon="warning",
-        )
-
-        temp_root.destroy()
-
-        if result:
-            # 用户点击"是"，尝试以管理员权限重启
-            if run_as_admin():
-                sys.exit(0)  # 成功请求提升权限，退出当前进程
-            else:
-                # 提升权限失败
-                temp_root2 = tk.Tk()
-                temp_root2.withdraw()
-                messagebox.showerror("错误", "无法获取管理员权限，程序将退出。")
-                temp_root2.destroy()
-                sys.exit(1)
-        else:
-            # 用户点击"否"，退出程序
-            sys.exit(0)
-
     setup_logging()
 
     # 确保只运行一个实例
-    mutex = ensure_single_instance()
+    mutex = ensure_single_instance(MUTEX_UI)
     if mutex is None and HAS_WIN32:
         # 单实例检查失败，退出程序
         sys.exit(1)
