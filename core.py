@@ -197,6 +197,7 @@ def init_chrome(host):
     chrome_options.add_argument("--incognito")
     chrome_options.add_argument("disable-cache")
     chrome_options.add_argument("log-level=3")
+    chrome_options.add_argument("--headless=new")
 
     try:
         chrome = webdriver.Chrome(options=chrome_options)
