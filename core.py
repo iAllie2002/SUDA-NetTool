@@ -59,6 +59,7 @@ DEFAULT_CONFIG = {
         "host": "http://10.9.1.3/",
         "frequencies": 10,
     },
+    "autostart": False,
 }
 
 

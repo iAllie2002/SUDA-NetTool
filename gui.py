@@ -57,7 +57,7 @@ def run_as_admin():
             1,
         )
         return True
-    except Exception as e:
+    except Exception:
         return False
 
 
@@ -385,11 +385,11 @@ class App:
             pass
 
     def _load_config(self):
-        cfg = load_config("config.json")
-        self.host_var.set(cfg["daemon"]["host"])
-        self.freq_var.set(str(cfg["daemon"]["frequencies"]))
+        self.config = load_config("config.json")
+        self.host_var.set(self.config["daemon"]["host"])
+        self.freq_var.set(str(self.config["daemon"]["frequencies"]))
 
-        login = cfg.get("login", {})
+        login = self.config.get("login", {})
         self.account_var.set(login.get("account", ""))
         self.password_var.set(login.get("password", ""))
         self.operator_var.set(login.get("operator", ""))
@@ -398,8 +398,19 @@ class App:
         self.password_xpath_var.set(login.get("password_xpath", ""))
         self.submit_xpath_var.set(login.get("submit_xpath", ""))
 
-        # 同步任务计划状态到UI
-        self.task_autostart_var.set(is_task_scheduler_enabled())
+        # 从配置文件读取开机自启状态（默认为 False）
+        autostart_enabled = self.config.get("autostart", False)
+        self.task_autostart_var.set(autostart_enabled)
+
+        # 同步实际的任务计划状态到配置文件（如果不一致则以配置文件为准）
+        actual_task_state = is_task_scheduler_enabled()
+        if actual_task_state != autostart_enabled:
+            # 如果实际任务状态和配置不符，则按配置文件设置任务计划
+            try:
+                set_task_scheduler_enabled(autostart_enabled)
+            except Exception:
+                # 如果设置失败（可能没有管理员权限），保持配置文件状态
+                pass
 
     def _create_persistent_tray(self):
         """创建常驻托盘图标"""
@@ -589,11 +600,14 @@ class App:
                 # 如果实际状态与期望不符，回滚
                 raise Exception("任务状态验证失败")
 
+            # 保存状态到配置文件
+            self.config["autostart"] = new_state
+            save_config(self.config)
+
             if new_state:
                 messagebox.showinfo(
                     "设置成功",
-                    "已创建系统启动任务。\n\n"
-                    "程序将在系统启动30秒后自动运行，\n"
+                    "已创建系统启动任务。\n\n程序将在系统启动30秒后自动运行，\n",
                 )
             else:
                 messagebox.showinfo("设置成功", "已取消系统启动任务。")
