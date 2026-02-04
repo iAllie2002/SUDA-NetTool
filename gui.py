@@ -9,7 +9,7 @@ import winreg
 import pystray
 from PIL import Image, ImageDraw, ImageTk
 
-from core import NetDaemon, load_config, save_config, setup_logging
+from core import NetDaemon, load_config, save_config, setup_logging, validate_config
 
 APP_NAME = "苏州大学网关自动登录工具"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -84,6 +84,10 @@ class App:
         self.root.geometry("480x300")
         self.root.minsize(480, 300)
         self.root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
+        # 注册退出清理
+        import atexit
+
+        atexit.register(self._safe_cleanup)
         self._set_window_icon()
         self._init_style()
 
@@ -97,6 +101,10 @@ class App:
 
         self._build_ui()
         self._load_config()
+
+        # 如果设置了开机自启动，程序启动时自动启动守护进程
+        if self.autostart_var.get():
+            self.root.after(1000, self._auto_start_daemon)
 
     def _build_ui(self):
         main = ttk.Frame(self.root, padding=10)
@@ -283,7 +291,31 @@ class App:
         self.password_xpath_var.set(login.get("password_xpath", ""))
         self.submit_xpath_var.set(login.get("submit_xpath", ""))
 
+    def _safe_cleanup(self):
+        """安全清理，用于程序异常退出时的保护"""
+        try:
+            if self.daemon and self.daemon.is_alive():
+                self.daemon.stop()
+        except Exception:
+            pass
+
+    def _auto_start_daemon(self):
+        """开机自启动时自动启动守护进程"""
+        try:
+            # 检查配置是否完整
+            if self.account_var.get().strip() and self.password_var.get().strip():
+                self.start()
+                self.hide_to_tray()  # 启动后最小化到托盘
+        except Exception as e:
+            self.append_log(f"自动启动失败: {e}")
+
     def _build_config(self):
+        try:
+            freq_str = self.freq_var.get().strip()
+            freq = int(freq_str) if freq_str else 10
+        except ValueError:
+            freq = 10
+
         return {
             "login": {
                 "account": self.account_var.get().strip(),
@@ -296,7 +328,7 @@ class App:
             },
             "daemon": {
                 "host": self.host_var.get().strip(),
-                "frequencies": int(self.freq_var.get().strip() or 10),
+                "frequencies": freq,
             },
         }
 
@@ -309,7 +341,16 @@ class App:
         if self.daemon and self.daemon.is_alive():
             self._set_status("已在运行")
             return
+
         cfg = self._build_config()
+
+        # 验证配置
+        valid, error_msg = validate_config(cfg)
+        if not valid:
+            messagebox.showerror("配置错误", f"配置验证失败：\n{error_msg}")
+            self._set_status("配置错误")
+            return
+
         save_config(cfg, "config.json")
         self.daemon = NetDaemon(cfg, on_status=self.handle_status)
         self.daemon.start()
@@ -361,6 +402,18 @@ class App:
             messagebox.showerror("错误", f"设置开机启动失败: {e}")
             self.autostart_var.set(is_autostart_enabled())
 
+    def _cleanup_and_exit(self):
+        """清理资源并退出程序"""
+        try:
+            if self.daemon and self.daemon.is_alive():
+                self.daemon.stop()
+                # 等待线程结束，最多等待3秒
+                self.daemon.join(timeout=3)
+        except Exception as e:
+            print(f"清理资源时出错: {e}")
+        finally:
+            self.root.destroy()
+
     def hide_to_tray(self):
         if self.tray_icon:
             return
@@ -374,7 +427,7 @@ class App:
         def on_exit(icon, _item=None):
             icon.stop()
             self.tray_icon = None
-            self.root.after(0, self.root.destroy)
+            self.root.after(0, self._cleanup_and_exit)
 
         self.tray_icon = create_tray_icon(on_open, on_exit)
         threading.Thread(target=self.tray_icon.run, daemon=True).start()

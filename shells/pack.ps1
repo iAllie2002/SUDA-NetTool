@@ -9,7 +9,7 @@ Copy-Item -Path "README.md" -Destination "dist\README.md" -Force
 
 # Zip release
 $compress = @{
-    Path = "dist\SUDA-Net-Daemon.exe", "dist\config.json", "dist\README.md", "resources"
+    Path = "dist\SUDA-Net-Daemon.exe", "dist\config.json", "dist\README.md"
     CompressionLevel = "Fastest"
     DestinationPath = "dist\SUDA-Net-Daemon.zip"
 }

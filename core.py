@@ -22,7 +22,7 @@ logger = logging.getLogger("SUDA-Net-Daemon")
 def setup_logging():
     if logger.handlers:
         return
-    logger.setLevel("ERROR")
+    logger.setLevel("INFO")
     handler = logging.StreamHandler()
     formatter = logging.Formatter(
         "[%(asctime)s %(levelname)s] %(message)s", "%d/%m/%Y %H:%M:%S"
@@ -30,11 +30,14 @@ def setup_logging():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     # 使用程序所在目录的绝对路径，避免权限问题
-    log_dir = os.path.dirname(os.path.abspath(__file__))
-    log_path = os.path.join(log_dir, "daemon.log")
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setFormatter(formatter)
-    logger.addHandler(file_handler)
+    try:
+        log_dir = os.path.dirname(os.path.abspath(__file__))
+        log_path = os.path.join(log_dir, "daemon.log")
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+    except Exception as e:
+        logger.warning(f"无法创建日志文件: {e}")
 
 
 DEFAULT_CONFIG = {
@@ -55,6 +58,10 @@ DEFAULT_CONFIG = {
 
 
 def load_config(path="config.json"):
+    # 使用程序所在目录的绝对路径
+    if not os.path.isabs(path):
+        config_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(config_dir, path)
     if not os.path.exists(path):
         return DEFAULT_CONFIG.copy()
     with open(path, "r", encoding="utf-8") as f:
@@ -68,8 +75,40 @@ def load_config(path="config.json"):
 
 
 def save_config(cfg, path="config.json"):
+    # 使用程序所在目录的绝对路径
+    if not os.path.isabs(path):
+        config_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(config_dir, path)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def validate_config(cfg):
+    """验证配置完整性，返回(是否有效, 错误信息)"""
+    errors = []
+
+    login = cfg.get("login", {})
+    if not login.get("account", "").strip():
+        errors.append("账号不能为空")
+    if not login.get("password", "").strip():
+        errors.append("密码不能为空")
+
+    daemon = cfg.get("daemon", {})
+    host = daemon.get("host", "").strip()
+    if not host:
+        errors.append("网关地址不能为空")
+    elif not (host.startswith("http://") or host.startswith("https://")):
+        errors.append("网关地址必须以 http:// 或 https:// 开头")
+
+    freq = daemon.get("frequencies", 10)
+    try:
+        freq = int(freq)
+        if freq < 5 or freq > 3600:
+            errors.append("检测间隔必须在 5-3600 秒之间")
+    except (ValueError, TypeError):
+        errors.append("检测间隔必须是有效的数字")
+
+    return len(errors) == 0, "；".join(errors)
 
 
 def _find_first_by_xpath(chrome, xpaths):
@@ -242,12 +281,15 @@ class NetDaemon(threading.Thread):
         self.chrome = None
 
     def stop(self):
+        """停止守护进程并清理资源"""
+        logger.info("正在停止网络守护进程...")
         self._stop_event.set()
         try:
             if self.chrome:
                 self.chrome.quit()
-        except Exception:
-            pass
+                self.chrome = None
+        except Exception as e:
+            logger.warning(f"关闭浏览器时出错: {e}")
 
     def _emit(self, text):
         if self.on_status:
